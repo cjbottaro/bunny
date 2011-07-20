@@ -1,6 +1,7 @@
 # encoding: utf-8
 
 require "qrack/amq-client-url"
+require "qrack/connection"
 
 module Qrack
 
@@ -53,6 +54,7 @@ module Qrack
       @channel = create_channel()
       @exchanges ||= {}
       @queues ||= {}
+      @connection_type = opts[:connection_type] || default_connection_type
     end
 
 
@@ -189,30 +191,33 @@ module Qrack
     def socket
       return @socket if @socket and (@status == :connected) and not @socket.closed?
 
+      # The following line takes a lowercased, underscored symbol and converts it to a camel cased string, Ex:
+      #   :fibered_em => FiberedEm
+      #   :socket => Socket
+      connection_class_name = @connection_type.to_s.split("_").collect{ |s| s.capitalize }.join
+
+      # Get the connection class.
+      connection_class = Qrack::Connection.const_get(connection_class_name)
+
       begin
-        # Attempt to connect.
-        @socket = Bunny::Timer::timeout(@connect_timeout, ConnectionTimeout) do
-          TCPSocket.new(host, port)
-        end
-
-        if Socket.constants.include?('TCP_NODELAY') || Socket.constants.include?(:TCP_NODELAY)
-          @socket.setsockopt Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1
-        end
-
-        if @ssl
-          require 'openssl' unless defined? OpenSSL::SSL
-          @socket = OpenSSL::SSL::SSLSocket.new(@socket)
-          @socket.sync_close = true
-          @socket.connect
-          @socket.post_connection_check(host) if @verify_ssl
-          @socket
-        end
+        @socket = connection_class.new host, port, :connect_timeout => @connect_timeout,
+                                                   :ssl             => @ssl,
+                                                   :verify_ssl      => @verify_ssl
       rescue => e
+        raise
         @status = :not_connected
         raise Bunny::ServerDownError, e.message
       end
 
       @socket
+    end
+
+    def default_connection_type
+      if defined?(EM) and defined?(Fiber) and EM.reactor_running? and Fiber.respond_to?(:current)
+        :fibered_em
+      else
+        :socket
+      end
     end
 
   end
