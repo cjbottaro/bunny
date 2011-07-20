@@ -204,7 +204,6 @@ module Qrack
                                                    :ssl             => @ssl,
                                                    :verify_ssl      => @verify_ssl
       rescue => e
-        raise
         @status = :not_connected
         raise Bunny::ServerDownError, e.message
       end
